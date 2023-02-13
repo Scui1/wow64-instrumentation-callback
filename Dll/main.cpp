@@ -21,6 +21,17 @@ extern "C" void InstrumentationCallbackProxy(VOID);
 extern "C" void InstrumentationCallback(uintptr_t, uintptr_t, uintptr_t);
 
 NtSetInformationProcess_t NtSetInformationProcess = (NtSetInformationProcess_t)GetProcAddress(GetModuleHandle(L"ntdll"), "NtSetInformationProcess");
+unsigned int ntReadVirtualMemoryIndex = -1;
+
+
+unsigned int ExtractSyscallIndexForNtdllFunc(const char* functionName)
+{
+	unsigned char* functionAddress = reinterpret_cast<unsigned char*>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), functionName));
+	if (!functionAddress || functionAddress[0] != 0xB8 || functionAddress[5] != 0xBA)
+		return -1;
+
+	return *reinterpret_cast<unsigned int*>(functionAddress + 1);
+}
 
 void InstrumentationCallback(uintptr_t returnAddress, uintptr_t returnVal, uintptr_t previousSpMinus4)
 {
@@ -36,7 +47,7 @@ void InstrumentationCallback(uintptr_t returnAddress, uintptr_t returnVal, uintp
 		if (opCodes && opCodes[0] == 0xB8 && opCodes[5] == 0xBA) // Windows 10 only
 		{
 			const unsigned int syscallNumber = *reinterpret_cast<unsigned int*>(opCodes + 1);
-			if (syscallNumber == 0x3f) // NtReadVirtualMemory
+			if (syscallNumber == ntReadVirtualMemoryIndex)
 			{
 				const auto arguments = reinterpret_cast<void**>(previousSpMinus4 + 8); // + 4 to get to stack ptr, + 4 to get to arguments
 
@@ -64,6 +75,15 @@ void InstrumentationCallback(uintptr_t returnAddress, uintptr_t returnVal, uintp
 
 void SetupHook()
 {
+	ntReadVirtualMemoryIndex = ExtractSyscallIndexForNtdllFunc("NtReadVirtualMemory");
+	if (ntReadVirtualMemoryIndex == -1)
+	{
+		std::cout << "Syscall index for NtReadVirtualMemory not found :(" << std::endl;
+		return;
+	}
+
+	std::cout << "Syscall index for NtReadVirtualMemory: 0x" << std::hex << ntReadVirtualMemoryIndex << std::endl;
+
 	PROCESS_INSTRUMENTATION_CALLBACK_INFORMATION callbackInfo;
 	callbackInfo.version = (ULONG)InstrumentationCallbackProxy;
 	callbackInfo.callback = InstrumentationCallbackProxy;
