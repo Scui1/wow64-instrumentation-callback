@@ -29,7 +29,7 @@ unsigned int ExtractSyscallIndexForNtdllFunc(const char* functionName)
 	return *reinterpret_cast<unsigned int*>(functionAddress + 1);
 }
 
-extern "C" void InstrumentationCallback(uintptr_t returnAddress, uintptr_t returnVal, uintptr_t previousSpMinus4)
+void InstrumentationCallback(uintptr_t returnAddress, uintptr_t returnVal, uintptr_t previousSpMinus4)
 {
 	uintptr_t teb = (uintptr_t)NtCurrentTeb();
 	constexpr int cbDisableOffset = 0x01B8;   // TEB32->InstrumentationCallbackDisabled offset
