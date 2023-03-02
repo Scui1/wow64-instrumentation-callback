@@ -20,11 +20,6 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <MASM Include="proxy.asm">
-      <Filter>Source Files</Filter>
-    </MASM>
-  </ItemGroup>
-  <ItemGroup>
     <ClInclude Include="address.h">
       <Filter>Header Files</Filter>
     </ClInclude>

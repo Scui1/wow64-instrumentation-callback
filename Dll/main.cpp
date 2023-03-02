@@ -17,12 +17,8 @@ struct PROCESS_INSTRUMENTATION_CALLBACK_INFORMATION
 };
 using NtSetInformationProcess_t = NTSTATUS(NTAPI*)(HANDLE processHandle, PROCESS_INFORMATION_CLASS processInformationClass, PVOID processInformation, ULONG processInformationLength);
 
-extern "C" void InstrumentationCallbackProxy(VOID);
-extern "C" void InstrumentationCallback(uintptr_t, uintptr_t, uintptr_t);
-
 NtSetInformationProcess_t NtSetInformationProcess = (NtSetInformationProcess_t)GetProcAddress(GetModuleHandle(L"ntdll"), "NtSetInformationProcess");
 unsigned int ntReadVirtualMemoryIndex = -1;
-
 
 unsigned int ExtractSyscallIndexForNtdllFunc(const char* functionName)
 {
@@ -33,7 +29,7 @@ unsigned int ExtractSyscallIndexForNtdllFunc(const char* functionName)
 	return *reinterpret_cast<unsigned int*>(functionAddress + 1);
 }
 
-void InstrumentationCallback(uintptr_t returnAddress, uintptr_t returnVal, uintptr_t previousSpMinus4)
+extern "C" void InstrumentationCallback(uintptr_t returnAddress, uintptr_t returnVal, uintptr_t previousSpMinus4)
 {
 	uintptr_t teb = (uintptr_t)NtCurrentTeb();
 	constexpr int cbDisableOffset = 0x01B8;   // TEB32->InstrumentationCallbackDisabled offset
@@ -70,6 +66,49 @@ void InstrumentationCallback(uintptr_t returnAddress, uintptr_t returnVal, uintp
 		}
 
 		*instrumentationCallbackDisabled = 0;
+	}
+}
+
+__declspec(naked) void InstrumentationCallbackProxy()
+{
+	__asm
+	{
+		push    esp; back - up ESP, ECX, and EAX to restore them
+		push    ecx
+		push    eax
+		mov     eax, 1; Set EAX to 1 for comparison
+		cmp     fs : 1b8h, eax; See if the recurion flag has been set
+		je      resume; Jumpand restore the registers if it hasand resume
+		pop     eax
+		pop     ecx
+		pop     esp
+		mov     fs : 1b0h, ecx; InstrumentationCallbackPreviousPc
+		mov     fs : 1b4h, esp; InstrumentationCallbackPreviousSp
+		push    edx
+		mov     edx, esp
+
+		pushad; Push registers to stack
+		pushfd; Push flags to the stack
+		cld; Clear direction flag
+		push    edx
+		push    eax; Return value
+		push    ecx; Return address
+
+		call    InstrumentationCallback
+		add     esp, 0Ch; Correct stack postion
+
+		popfd; Restore stored flags
+		popad; Restore stored registers
+		pop     edx
+
+		mov     esp, fs:1b4h; Restore ESP
+		mov     ecx, fs:1b0h; Restore ECX
+		jmp     ecx; Resume execution
+	resume :
+		pop     eax
+		pop     ecx
+		pop     esp
+		jmp     ecx
 	}
 }
 
