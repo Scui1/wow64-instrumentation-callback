@@ -29,7 +29,7 @@ unsigned int ExtractSyscallIndexForNtdllFunc(const char* functionName)
 	return *reinterpret_cast<unsigned int*>(functionAddress + 1);
 }
 
-void InstrumentationCallback(uintptr_t returnAddress, uintptr_t returnVal, uintptr_t previousSpMinus4)
+void InstrumentationCallback(uintptr_t returnAddress, uintptr_t* returnVal, uintptr_t previousSpMinus4)
 {
 	uintptr_t teb = (uintptr_t)NtCurrentTeb();
 	constexpr int cbDisableOffset = 0x01B8;   // TEB32->InstrumentationCallbackDisabled offset
@@ -62,6 +62,8 @@ void InstrumentationCallback(uintptr_t returnAddress, uintptr_t returnVal, uintp
 				const auto caller = STACK_FRAME.PreviousFrame().GetReturnAddress().GetPtr();
 
 				std::cout << "Readprocessmemory hook!! coming from: 0x" << std::hex << caller << std::endl;
+
+				*returnVal = 0x8000000D;
 			}
 		}
 
@@ -86,6 +88,8 @@ __declspec(naked) void InstrumentationCallbackProxy()
 		mov     fs : 1b4h, esp; InstrumentationCallbackPreviousSp
 		push    edx
 		mov     edx, esp
+		push	eax
+		lea eax, [esp]
 
 		pushad; Push registers to stack
 		pushfd; Push flags to the stack
@@ -99,8 +103,9 @@ __declspec(naked) void InstrumentationCallbackProxy()
 
 		popfd; Restore stored flags
 		popad; Restore stored registers
+		pop eax
 		pop     edx
-
+		
 		mov     esp, fs:1b4h; Restore ESP
 		mov     ecx, fs:1b0h; Restore ECX
 		jmp     ecx; Resume execution
