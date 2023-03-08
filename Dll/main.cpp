@@ -29,15 +29,17 @@ unsigned int ExtractSyscallIndexForNtdllFunc(const char* functionName)
 	return *reinterpret_cast<unsigned int*>(functionAddress + 1);
 }
 
-void InstrumentationCallback(uintptr_t returnAddress, uintptr_t* returnVal, uintptr_t previousSpMinus4)
+void InstrumentationCallback(uintptr_t returnAddress, uintptr_t* returnVal)
 {
 	uintptr_t teb = (uintptr_t)NtCurrentTeb();
-	constexpr int cbDisableOffset = 0x01B8;   // TEB32->InstrumentationCallbackDisabled offset
-	uintptr_t* instrumentationCallbackDisabled = reinterpret_cast<uintptr_t*>(teb + cbDisableOffset);
-
+	constexpr int tebDisableOffset = 0x1B8;   // TEB32->InstrumentationCallbackDisabled offset
+	constexpr int tebPreviousSpOffset = 0x1B4; // TEB32->InstrumentationCallbackPreviousSp
+	bool* instrumentationCallbackDisabled = reinterpret_cast<bool*>(teb + tebDisableOffset);
+	uintptr_t instrumentationCallbackPreviousSp = *reinterpret_cast<uintptr_t*>(teb + tebPreviousSpOffset);
+	
 	if (!(*instrumentationCallbackDisabled))
 	{
-		*instrumentationCallbackDisabled = 1; // TEB->InstrumentaionCallbackDisabled flag to prevent recursion.
+		*instrumentationCallbackDisabled = true; // TEB->InstrumentationCallbackDisabled flag to prevent recursion.
 
 		unsigned char* opCodes = reinterpret_cast<unsigned char*>(returnAddress - 0xC); // returnAddress is at ret instruction, so we move back to the mov eax instruction
 		if (opCodes && opCodes[0] == 0xB8 && opCodes[5] == 0xBA) // Windows 10 only
@@ -45,7 +47,7 @@ void InstrumentationCallback(uintptr_t returnAddress, uintptr_t* returnVal, uint
 			const unsigned int syscallNumber = *reinterpret_cast<unsigned int*>(opCodes + 1);
 			if (syscallNumber == ntReadVirtualMemoryIndex)
 			{
-				const auto arguments = reinterpret_cast<void**>(previousSpMinus4 + 8); // + 4 to get to stack ptr, + 4 to get to arguments
+				const auto arguments = reinterpret_cast<void**>(instrumentationCallbackPreviousSp + 4); // + 4 to get to arguments
 
 				const auto processHandle = reinterpret_cast<HANDLE>(arguments[0]);
 				const auto address = reinterpret_cast<uintptr_t>(arguments[1]);
@@ -63,11 +65,10 @@ void InstrumentationCallback(uintptr_t returnAddress, uintptr_t* returnVal, uint
 
 				std::cout << "Readprocessmemory hook!! coming from: 0x" << std::hex << caller << std::endl;
 
-				*returnVal = 0x8000000D;
 			}
 		}
 
-		*instrumentationCallbackDisabled = 0;
+		*instrumentationCallbackDisabled = false;
 	}
 }
 
@@ -86,26 +87,21 @@ __declspec(naked) void InstrumentationCallbackProxy()
 		pop     esp
 		mov     fs : 1b0h, ecx; InstrumentationCallbackPreviousPc
 		mov     fs : 1b4h, esp; InstrumentationCallbackPreviousSp
-		push    edx
-		mov     edx, esp
 		push	eax
-		lea eax, [esp]
+		lea		eax, [esp]
 
-		pushad; Push registers to stack
-		pushfd; Push flags to the stack
-		cld; Clear direction flag
-		push    edx
+		pushad	; Push registers to stack
+		pushfd	; Push flags to the stack
+		cld		; Clear direction flag
 		push    eax; Return value
 		push    ecx; Return address
 
 		call    InstrumentationCallback
-		add     esp, 0Ch; Correct stack postion
+		add     esp, 08h; Correct stack postion
 
-		popfd; Restore stored flags
-		popad; Restore stored registers
-		pop eax
-		pop     edx
-		
+		popfd	; Restore stored flags
+		popad	; Restore stored registers
+		pop		eax
 		mov     esp, fs:1b4h; Restore ESP
 		mov     ecx, fs:1b0h; Restore ECX
 		jmp     ecx; Resume execution
